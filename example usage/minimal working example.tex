@@ -1,0 +1,29 @@
+\documentclass[11pt]{article} % use larger type; default would be 10pt
+
+\usepackage{geometry}
+\geometry{a4paper}
+
+\title{SParaser Minimal Working Example}
+\author{Matthias Lüken}
+
+\input{preamble/sparser.tex}
+
+\begin{document}
+\maketitle
+
+\sparse{statistics/query1.txt}
+
+\begin{table}
+\sparsertime{statistics/query1_time.txt}[1]
+\end{table}
+
+\begin{table}
+\sparserio[14]{statistics/query1_io_b1s6.txt}
+\end{table}
+
+\begin{table}
+\sparserio{statistics/query1_io_b2s3.txt}[statistics/query1_io_b1s7.txt][1][2]
+\end{table}
+
+
+\end{document}

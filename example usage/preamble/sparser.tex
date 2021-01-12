@@ -1,0 +1,1171 @@
+%required packages
+\usepackage{xparse}
+\usepackage{xstring}
+\usepackage{xcolor}
+\usepackage{datatool}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{colortbl}
+\usepackage{multirow}
+
+%colors
+% can be overwritten in main document
+\makeatletter
+\@ifundefinedcolor{sporange}{\definecolor{sporange}{HTML}{ff9c00}}
+\makeatother
+\makeatletter
+\@ifundefinedcolor{spdarkgreen}{\definecolor{spdarkgreen}{HTML}{0CAC64}}
+\makeatother
+\makeatletter
+\@ifundefinedcolor{spgray}{\definecolor{spgray}{HTML}{869191}}
+\makeatother
+\makeatletter
+\@ifundefinedcolor{spred}{\definecolor{spred}{HTML}{FF0A33}}
+\makeatother
+
+% outputting numbers is done via the \num command from the siunitx package, but using it is optional
+\ifcsname num\endcsname \else\newcommand{\num}{\relax}\fi
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Copyright (c) 2021 Matthias Lüken
+% https://github.com/matthiaslueken/sparser/
+%
+% CONTENTS
+%
+% ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+% Name						Use				Description													Parameters
+% ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+% \sparser_debug_out:n 		internal			outputs text when debug flag is set							text (string)
+% ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+% \sparse						Document		Parser for time and io statistics								file (string), debug out (0/1)
+% \sparser_readdata:nn			internal			loops through lines of input file								file (string), debug out (0/1)
+% \sparser_fsm:nn				internal			finite state machine of parser								state (string), active (0/1)
+% \sparser_writedata:n 			internal			buffers and writes data to files								line from input file (string)
+% \sparser_data_getdigits:n	internal			extracts digits from elements of clist							clist
+% \sparser_file_time:nnn 		internal			generates file name for time output							folder, filename, extension (string)
+% \sparser_file_io:nnn 			internal			generates file name for io output							folder, filename, extension (string)
+% \sparser_close_stream:n 		internal			closes output stream and sets flag							output (string)			
+% \sparser_open_stream:n 		internal			opens output stream and sets flag							output (string)			
+% ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+% \sparsertime					Document		generates a table with time statistics	file (string)				file (string)
+% \sparserio	 				Document		wrapper function for io tables								fileA (string), fileB (string), skip (0/1), coloring (0/1)
+% \sparseriosingletable 			internal			generates a table with io statistics							file (string)
+% \sparseriotablecompare 		internal			generates a table comparing two io statistics					fileA (string), fileB (string), skip (0/1), coloring (0/1)
+% \sparser_match_tables:nn	internal			adds rows to two dbs to make their first columns identical	databaseA (string), databaseB (string)
+% \sparser_breakanywhere:Nn	internal			allows latex to wrap word anywhere							string (string), length (int)
+% \sparser_colorscale:nnnnn	internal			adds color for table cell based on |#2-#1|/max(#3,#4)		a, b, x, y (integer)
+% \sparser_dict:n 				internal			dictionary for multilingual support							phrase (string)
+% ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\ExplSyntaxOn
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparser_debug_out:n
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\cs_new:Npn \sparser_debug_out:n #1 {
+	\bool_if:NTF \l__sparser_debug_bool {#1}{}
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparse
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\NewDocumentCommand{\sparse}{m O{0}}
+{
+	\texttt{
+		\sparser_readdata:nn { #1 }{ #2 }
+	}
+}
+
+% variables for sparse
+
+% file io streams
+\ior_new:N \g__sparser_read_ior
+\iow_new:N \g__sparser_write_time_iow
+\iow_new:N \g__sparser_write_io_iow
+
+% flags if write stream is open
+\bool_new:N \l__sparser_output_time_open_bool
+\bool_new:N \l__sparser_output_io_open_bool
+
+%file names
+\str_new:N \l__sparser_inputfile_str
+\str_new:N \l__sparser_output_time_str
+\str_new:N \l__sparser_output_io_str
+
+% line
+\tl_new:N \l__sparser_line_tl
+\str_new:N \l__sparser_line_str
+
+%data
+\clist_new:N \l__sparser_data_comp_clist
+\clist_new:N \l__sparser_data_exec_clist
+\clist_new:N \l__sparser_data_time_clist
+\clist_new:N \l__sparser_data_io_clist
+\tl_new:N \l__sparser_tablename_tl
+
+% internal state and active variable
+\str_new:N \l__sparser_state_str
+\bool_new:N \l__sparser_active_bool
+\bool_new:N \l__sparser_ignore_bool
+\bool_new:N \l__sparser_debug_bool
+
+% batch and statement counters
+\int_new:N \l__sparser_batch_int
+\int_new:N \l__sparser_statement_int
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparser_readdata:nn
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\cs_new:Npn \sparser_readdata:nn #1 #2
+% parameter: #1: file of statistics text file
+% parameter: #2: debug out flag
+{
+%switch on/off debug
+	\int_case:nn #2
+	{
+		{0} {\bool_set_false:N \l__sparser_debug_bool}
+		{1} {\bool_set_true:N \l__sparser_debug_bool}
+	}
+
+%	init state, batch and statement counters
+	\str_set:Nn \l__sparser_state_str {init}
+	\bool_set_false:N \l__sparser_active_bool
+	\int_set:Nn \l__sparser_batch_int {0}
+	\int_set:Nn \l__sparser_statement_int {0}	
+	
+%	output streams closed
+	\bool_set_false:N \l__sparser_output_time_open_bool
+	\bool_set_false:N \l__sparser_output_io_open_bool
+
+%	store input file name and open stream
+	\str_set:Nn \l__sparser_inputfile_str {#1}
+	\ior_open:Nn \g__sparser_read_ior {\l__sparser_inputfile_str}
+	
+	\sparser_debug_out:n {parsing\ \textcolor{spdarkgreen}{#1}...\\}
+%	loop through input file line by line
+	\ior_map_inline:Nn \g__sparser_read_ior
+		{
+%			store line, remove all numbers and spaces, convert it to a string und take the last 105 characters
+			\tl_set:Nn \l__sparser_line_tl {##1}
+			\regex_replace_all:nnN {\s*|[0-9][0-9]*} {} \l__sparser_line_tl
+			\str_set:Nx \l__sparser_line_str {\tl_to_str:N \l__sparser_line_tl}
+			\str_set:Nx \l__sparser_line_str {\str_range:Nnn \l__sparser_line_str {-105} {-1}}
+
+%			switch states if the line matches a key phrase
+%			the machine stays in the same state untill a new key phrase is recognized,
+%			but deactivates upon unknown input
+%			key phrases are recognized for english and german statistics
+			\str_case_e:nnTF \l__sparser_line_str
+				{
+%					compile time header
+					{SQL Server parse and compile time:} {\sparser_fsm:nn {comp}{0}}
+					{SQL Server-Analyse- und Kompilierzeit:} {\sparser_fsm:nn {comp}{0}}
+%					execution time header
+					{SQL Server Execution Times:} {\sparser_fsm:nn {exec}{0}}
+					{SQL Server-Ausführungszeiten:} {\sparser_fsm:nn {exec}{0}}
+%					io statistics
+					{Scan count , logical reads , physical reads , read-ahead reads , lob logical reads , lob physical reads , lob read-ahead reads.} {\sparser_fsm:nn {io}{1}}
+					{e , Read-Ahead-Lesevorgänge , logische LOB-Lesevorgänge , physische LOB-Lesevorgänge , Read-Ahead-LOB-Lesevorgänge.} {\sparser_fsm:nn {io}{1}}
+%					rows affected
+					{( rows affected)} {\sparser_fsm:nn {rows}{1}}
+					{( Zeilen betroffen)} {\sparser_fsm:nn {rows}{1}}
+					{( Zeile betroffen)} {\sparser_fsm:nn {rows}{1}}
+%					compile or execution time data
+					{, CPU-Zeit = ms, verstrichene Zeit = ms.} {\sparser_fsm:nn {}{1}}
+					{CPU time = ms, elapsed time = ms.} {\sparser_fsm:nn {}{1}}
+				}
+				{
+%					when matched and machine active, handle data
+					\bool_if:NTF \l__sparser_active_bool
+						{
+							\sparser_debug_out:n {\textcolor{spgray}{data:\ }}
+							\sparser_writedata:n {##1}
+						}
+						{
+							\sparser_debug_out:n {\textcolor{spgray}{\str_range:Nnn {##1} {1}{32}}\\}
+						}
+				}
+				{
+%					when not matched
+					\sparser_fsm:nn {unknown}{0}
+					\sparser_debug_out:n {
+						\textcolor{spred}{no\ match:\ }
+						\textcolor{spgray}{\str_range:Nnn \l__sparser_line_tl {1}{32}}\\
+					}
+				}
+		}
+
+%	close input file streamf
+	\ior_close:N \g__sparser_read_ior
+
+%	close io output file stream	 if open
+	\sparser_close_stream:n {io}
+
+%	close comp output file stream if open
+	\sparser_close_stream:n {time}
+\sparser_debug_out:n {
+	...finished\ parsing\ \textcolor{spdarkgreen}{#1}\\
+}
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparser_fsm:nn
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% upon switching to a new state, this function creates files, opens and closes streams and sets counters
+\cs_new:Npn \sparser_fsm:nn #1 #2
+% parameter: #1: new state, #2: active
+{
+% new states are not ignored by default. Set true if something is wrong and input shoud be ignored
+	\bool_set_false:N \l__sparser_ignore_bool
+	
+%	actions depending on the new state
+	\str_case_e:nnTF {#1}
+	{
+%		general layout: check previous state, set counters, create files
+
+%		compile time
+		{comp} {
+%			compile times always mark the start of a new batch
+%			set counters
+			\int_set:Nn \l__sparser_batch_int {\l__sparser_batch_int+1}
+			\int_set:Nn \l__sparser_statement_int {0}
+%			check if time output stream is open
+			\bool_if:NTF {\l__sparser_output_time_open_bool}
+				{}%yes
+				{%no: create new file
+					\sparser_open_stream:n {time}
+				}
+		}
+%		execution time
+		{exec} {
+%			check previous state
+			\str_case_e:nnTF \l__sparser_state_str 
+			{
+				{io} {}%io followed by exec => same statement
+				{init} {
+					%init should not be followed by exed => ignore input
+					\bool_set_true:N \l__sparser_ignore_bool
+				}
+			}
+			{
+				%match: do nothing
+			}
+			{
+%				no match => new statement: set counters
+				\int_set:Nn \l__sparser_statement_int {\l__sparser_statement_int+1}
+			}
+		}
+		{io} {
+%			check previous state	
+			\str_case_e:nnTF \l__sparser_state_str
+			{
+				{init} {
+%					io first state => no statistics time: set counters
+					\int_set:Nn \l__sparser_batch_int {1}
+					\int_set:Nn \l__sparser_statement_int {\l__sparser_statement_int+1}
+				}
+				{rows} {}%rows followes by io => same statement
+				{io} {
+%						if io was the last state, check if machine was active
+						\bool_if:NTF \l__sparser_active_bool
+							{}%yes: part of the same statement
+							{%no: no count and statistics time off: new statement
+								\int_set:Nn \l__sparser_statement_int {\l__sparser_statement_int+1}
+							}
+				}
+			}
+			{}
+			{
+%				no match => new statement: set counters
+				\int_set:Nn \l__sparser_statement_int {\l__sparser_statement_int+1}
+			}
+
+%			close and open a new io file unless the last state was io and the machine was active				
+			\bool_if:nTF {!(\str_if_eq_p:NN \l__sparser_state_str {io} && \l__sparser_active_bool)}
+			{
+				\sparser_close_stream:n {io}
+				\sparser_open_stream:n {io}
+			}
+			{}
+		}
+		{rows} {
+			\str_case_e:nnTF \l__sparser_state_str
+			{
+				{init} {}
+			}
+			{
+				%first state menas no time statistics: ignore
+				\bool_set_true:N \l__sparser_ignore_bool	
+			}
+			{		
+%				check if exec list is empty
+				\clist_if_empty:NTF \l__sparser_data_exec_clist
+				{
+%					empty: everythink ok, increase statement counter
+					\int_set:Nn \l__sparser_statement_int {\l__sparser_statement_int+1}
+				}
+				{
+%					not empty: something is wrong, dont change state and deactivate
+					\bool_set_true:N \l__sparser_ignore_bool	
+				}
+			}
+		}
+	}
+	{
+%	match: set new state if not ignored
+		\bool_if:nTF \l__sparser_ignore_bool
+		{}
+		{
+			\str_set:Nn \l__sparser_state_str {#1}
+		}
+	}
+	{}
+
+%	(de)activate if not ignored
+	\bool_if:nTF \l__sparser_ignore_bool
+	{
+		\bool_set_false:N \l__sparser_active_bool
+	}
+	{
+		\int_case:nn #2
+		{
+			{0} {\bool_set_false:N \l__sparser_active_bool}
+			{1} {\bool_set_true:N \l__sparser_active_bool}
+		}
+	}
+	\sparser_debug_out:n {
+		b: \int_use:N \l__sparser_batch_int\ 
+		s: \int_use:N \l__sparser_statement_int\ 
+		a: \bool_if:NTF \l__sparser_active_bool {1}{0}\ 
+		state:\textcolor{spdarkgreen}{\str_range:Nnn {\l__sparser_state_str..} {1} {4}}\ 
+		\bool_if:nTF \l__sparser_ignore_bool {\textcolor{spred}{ignored:\ }}{}
+	}
+
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparser_writedata:n
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% clists are used as internal buffers, which are handled here.
+% when complete, the buffer is written to file and cleared.
+\cs_new:Npn \sparser_writedata:n #1 {
+	\str_case_e:nnTF \l__sparser_state_str
+	{
+		{comp} {
+%			add line to comma seperated list
+			\clist_put_right:Nx \l__sparser_data_comp_clist {#1}
+%			remove all characters except digits item-wise
+			\sparser_data_getdigits:n \l__sparser_data_comp_clist
+%			prepend batch number
+			\clist_put_left:Nx \l__sparser_data_comp_clist {{\int_use:N \l__sparser_batch_int}}
+			\sparser_debug_out:n {
+				\clist_use:Nn \l__sparser_data_comp_clist {,}
+				\ \textcolor{sporange}{buffered}
+			}
+%			 set time clist equal to comp clist
+			\clist_set_eq:NN \l__sparser_data_time_clist \l__sparser_data_comp_clist
+%			clear list
+			\clist_clear:N \l__sparser_data_comp_clist
+			
+		}
+		{exec} {
+%			if the list is empty wether no rows where affected or nocount was used
+%			add zero to list then
+			\clist_if_empty:NTF \l__sparser_data_exec_clist
+				{\clist_put_right:Nn \l__sparser_data_exec_clist {0}}
+				{}
+%			add line to comma seperated list
+			\clist_put_right:Nx \l__sparser_data_exec_clist {#1}
+%			remove all characters except digits item-wise
+			\sparser_data_getdigits:n \l__sparser_data_exec_clist
+%			prepend statement number
+			\clist_put_left:Nx \l__sparser_data_exec_clist {{\int_use:N \l__sparser_statement_int}}
+			\sparser_debug_out:n {
+				\clist_use:Nn \l__sparser_data_exec_clist {,}
+				\ \textcolor{spdarkgreen}{written}
+			}
+%			append exec clist to times clist and write to file
+			\clist_concat:NNN \l__sparser_data_time_clist \l__sparser_data_time_clist \l__sparser_data_exec_clist
+%			write to file			
+			\iow_now:Nx \g__sparser_write_time_iow {\clist_use:Nn \l__sparser_data_time_clist {,}}
+%			reset list
+			\clist_set:Nn \l__sparser_data_time_clist {0,0,0}
+%			clear list
+			\clist_clear:N \l__sparser_data_exec_clist
+		}
+		{io} {
+%			store line in variable
+			\tl_set:Nn \l__sparser_line_tl {#1}
+%			replace ". Scan" with ", Scan" to make the table name the first item
+			\tl_replace_once:Nnn \l__sparser_line_tl {.~Scan} {,~Scan}
+%			add line to comma seperated list
+			\clist_put_right:Nx \l__sparser_data_io_clist {\l__sparser_line_tl}
+			\clist_pop:NN \l__sparser_data_io_clist \l__sparser_tablename_tl
+%			remove "Table '...'" and "-Tabelle" (depending on language)
+			\tl_replace_once:Nnn \l__sparser_tablename_tl {-Tabelle} {}
+			\tl_replace_once:Nnn \l__sparser_tablename_tl{Table~} {}
+			\tl_replace_all:Nnn \l__sparser_tablename_tl {'} {}
+%			remove all characters except digits item-wise
+			\sparser_data_getdigits:n \l__sparser_data_io_clist
+%			prepend table name
+			\clist_put_left:Nx \l__sparser_data_io_clist {{\tl_use:N \l__sparser_tablename_tl}}
+%			write to file
+			\iow_now:Nx \g__sparser_write_io_iow {\clist_use:Nn \l__sparser_data_io_clist {,}}
+			\sparser_debug_out:n {
+				\clist_map_inline:Nn \l__sparser_data_io_clist {\str_range:Nnn {\detokenize{##1}}{1}{12},}
+				\ \textcolor{spdarkgreen}{written}
+			}
+%			clear list
+			\clist_clear:N \l__sparser_data_io_clist
+		}
+		{rows} {
+%			check if exec list is empty
+			\clist_if_empty:NTF \l__sparser_data_exec_clist
+			{
+				\clist_put_right:Nx \l__sparser_data_exec_clist {#1}
+				\sparser_data_getdigits:n \l__sparser_data_exec_clist
+				\sparser_debug_out:n {
+					\clist_use:Nn \l__sparser_data_exec_clist {,}
+					\ \textcolor{sporange}{buffered}
+				}
+			}
+			{}
+		}
+	}
+	{}
+	{
+		\sparser_debug_out:n {#1\ \textcolor{spred}{ignored}}
+	}
+\sparser_debug_out:n {\\}
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparser_writedata:n
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% removes all non-digits from the elements of a clist
+\cs_new:Npn \sparser_data_getdigits:n #1 {
+	\clist_map_inline:Nn #1 {
+		\regex_replace_all:nnN {[^[,0-9]]*} {} {#1}
+	}
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparser_file_time:nnn & \sparser_file_io:nnn
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\cs_new:Npn \sparser_file_time:nnn #1 #2 #3 {#1/#2_time#3}
+\cs_new:Npn \sparser_file_io:nnn #1 #2 #3 {#1/#2_io_b\int_use:N \l__sparser_batch_int s\int_use:N \l__sparser_statement_int#3}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparser_close_stream:n
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\cs_new:Npn \sparser_close_stream:n #1 {
+	\str_case:nn {#1}
+	{
+		{io} {
+%			check if exec output stream is open
+			\bool_if:NTF {\l__sparser_output_io_open_bool}
+				{
+%					close exec output stream and set flag
+					\iow_close:N \g__sparser_write_io_iow
+					\bool_set_false:N \l__sparser_output_io_open_bool
+					\sparser_debug_out:n {
+						...closing\ \textcolor{spdarkgreen}{io}\ output\ stream\ 
+						\textcolor{spdarkgreen}{\l__sparser_output_io_str}\\
+					}
+				}
+				{}
+		}
+		{time} {
+%			check if exec output stream is open
+			\bool_if:NTF {\l__sparser_output_time_open_bool}
+				{
+%					close exec output stream and set flag
+					\iow_close:N \g__sparser_write_time_iow
+					\bool_set_false:N \l__sparser_output_time_open_bool
+					\sparser_debug_out:n {
+						...closing\ \textcolor{spdarkgreen}{time}\ output\ stream\ 
+						\textcolor{spdarkgreen}{\l__sparser_output_time_str}\\}
+				}
+				{}
+		}
+	}
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparser_open_stream:n
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\cs_new:Npn \sparser_open_stream:n #1 {
+	\str_case:nn {#1}
+	{
+		{io} {
+%				generate and store output file name
+				\str_set:Nx \l__sparser_output_io_str	{
+					\file_parse_full_name_apply:nN {\l__sparser_inputfile_str} \sparser_file_io:nnn
+				}
+%				open exec stream and set flag
+				\iow_open:Nn \g__sparser_write_io_iow \l__sparser_output_io_str
+				\iow_now:Nx \g__sparser_write_io_iow {Table, Scan count, logical reads, physical reads, read-ahead reads, lob logical reads, lob physical reads, lob read-ahead reads}
+				\bool_set_true:N \l__sparser_output_io_open_bool
+				\sparser_debug_out:n {
+					opening\ \textcolor{spdarkgreen}{io}\ output\ stream\ 
+					\textcolor{spdarkgreen}{\l__sparser_output_io_str}...\\
+				}
+		}
+		{time} {
+%				generate and store output file name
+				\str_set:Nx \l__sparser_output_time_str	{
+					\file_parse_full_name_apply:nN {\l__sparser_inputfile_str} \sparser_file_time:nnn
+				}
+%				open exec stream and set flag
+				\iow_open:Nn \g__sparser_write_time_iow \l__sparser_output_time_str
+				\iow_now:Nx \g__sparser_write_time_iow {Batch,CompCPUtime,CompElapsedtime,Statement,Rows,ExecCPUtime,ExecElapsedtime}
+				\bool_set_true:N \l__sparser_output_time_open_bool
+				\sparser_debug_out:n {
+					opening\ \textcolor{spdarkgreen}{time}\ output\ stream\ 
+					\textcolor{spdarkgreen}{\l__sparser_output_time_str}...\\
+				}
+		}
+	}
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparsertime
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\NewDocumentCommand{\sparsertime}{m O{0}} {
+\DTLloadrawdb[keys={batch,compcpu,compelapsed,statement,rows,execcpu,execelapsed}]{io1}{#1}
+
+\DTLsetnumberchars{}{,}
+\DTLsumcolumn{io1}{compcpu}{\tcompcpu}%
+\DTLsumcolumn{io1}{compelapsed}{\tcompelapsed}%
+\DTLsumcolumn{io1}{rows}{\trows}%
+\DTLsumcolumn{io1}{execcpu}{\texeccpu}%
+\DTLsumcolumn{io1}{execelapsed}{\texecelapsed}%
+
+\small{
+\begin{tabularx}{\linewidth}{
+>{\raggedleft\arraybackslash\hsize=0.6\hsize}X
+*{2}{>{\raggedleft\arraybackslash\hsize=1.15\hsize}X}
+*{2}{>{\raggedleft\arraybackslash\hsize=0.9\hsize}X}
+*{2}{>{\raggedleft\arraybackslash\hsize=1.15\hsize}X}
+}
+\toprule
+% Do the header row.
+{\bfseries\sparser_dict:n{Batch}}
+& \multicolumn{2}{c}{\bfseries\sparser_dict:n{Parse and compile time}}%
+& {\bfseries\sparser_dict:n{Statement}}
+&{\bfseries\sparser_dict:n{Rows}}
+& \multicolumn{2}{c}{\bfseries\sparser_dict:n{Execution Times}}%
+\\
+& {\sparser_dict:n{CPU}~[ms]} & {\sparser_dict:n{elapsed}~[ms]} & & & {\sparser_dict:n{CPU}~[ms]} & {\sparser_dict:n{elapsed}~[ms]}%
+% Iterate through the data.
+\DTLforeach*{io1}{\varbatch=batch,\varcompcpu=compcpu,\varcompelapsed=compelapsed,\varstatement=statement,\varrows=rows,\varexeccpu=execcpu,\varexecelapsed=execelapsed}{%
+\gdef\doamp{&}%
+%line break and first line
+\DTLiffirstrow{\\\midrule}{
+	\dtlifnumeq{\varbatch}{0}{
+		\dtlifnumeq{\skiprow}{0}{\\}{}
+	}{\\}
+}
+% columns 1-3
+\dtlifnumeq{\varbatch}{0}{%
+	\dtlifnumeq{\skiprow}{0}{
+		\doamp\doamp
+	}{}%
+}{%
+	\num{\varbatch}
+	\doamp\num{\varcompcpu}
+	\doamp\num{\varcompelapsed}
+}%
+% calculate skiprow flag
+\gdef\skiprow{#2}%
+\dtlifnumeq{\skiprow}{1}{%
+	\dtlifnumeq{\varrows}{0}{}{\gdef\skiprow{0}}%
+	\dtlifnumeq{\varexeccpu}{0}{}{\gdef\skiprow{0}}%
+	\dtlifnumeq{\varexecelapsed}{0}{}{\gdef\skiprow{0}}%
+}{}%
+% skiprow=0: show columns 4-7
+\dtlifnumeq{\skiprow}{0}{
+	\doamp\num{\varstatement}
+	\doamp\num{\varrows}
+	\doamp\num{\varexeccpu}
+	\doamp\num{\varexecelapsed}%
+}{}
+}%foreach
+\\\midrule
+\sparser_dict:n{Total}
+\doamp\num{\tcompcpu}
+\doamp\num{\tcompelapsed}
+\doamp
+\doamp\num{\trows}
+\doamp\num{\texeccpu}
+\doamp\num{\texecelapsed}
+\\\bottomrule%
+\end{tabularx}%
+}%end small
+\DTLgdeletedb{io1}%
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparserio
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\NewDocumentCommand{\sparserio}{o m o O{0} O{1}} {
+	\IfNoValueTF {#3} 
+		{\sparseriosingle {#2}[#1]}
+		{\sparseriocompare {#2}{#3}[#4][#5][#1]}
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparseriosingle
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\NewDocumentCommand{\sparseriosingle}{m O{0}} {
+\DTLloadrawdb[keys={table,scan,logical,physical,readahead,logicalLOB,physicalLOB,readaheadLOB}]{io1}{#1}
+\dtlsort{table}{io1}{\dtlwordindexcompare}
+
+\DTLsetnumberchars{}{,}
+\DTLsumcolumn{io1}{scan}{\tscan}%
+\DTLsumcolumn{io1}{logical}{\tlogical}%
+\DTLsumcolumn{io1}{physical}{\tphysical}%
+\DTLsumcolumn{io1}{readahead}{\treadahead}%
+\DTLsumcolumn{io1}{logicalLOB}{\tlogicalLOB}%
+\DTLsumcolumn{io1}{physicalLOB}{\tphysicalLOB}%
+\DTLsumcolumn{io1}{readaheadLOB}{\treadaheadLOB}%
+
+\small{
+\begin{tabularx}{\linewidth}{
+%8 columns: \hsize is \linewidth/8 by default
+%make first column wider: 1.7 + 7*0.9 = 8
+>{\hsize=1.7\hsize}X
+*{7}{>{\raggedleft\arraybackslash\hsize=0.9\hsize}X}
+}
+\toprule
+% Do the header row.
+{\bfseries\sparser_dict:n{Table}}%
+&{\bfseries\sparser_dict:n{Scans}}%
+& \multicolumn{3}{c}{\bfseries\sparser_dict:n{Reads}}%
+& \multicolumn{3}{c}{\bfseries\sparser_dict:n{LOB-Reads}}%
+\\%
+& & {\sparser_dict:n{logical}}
+& {\sparser_dict:n{physical}}
+& {\sparser_dict:n{r.-ahead}}
+& {\sparser_dict:n{logical}}
+& {\sparser_dict:n{physical}}
+& {\sparser_dict:n{r.-ahead}}%
+% Iterate through the data.
+\DTLforeach*{io1}{}{%
+\\\DTLiffirstrow{\midrule}{}%
+\gdef\doamp{\gdef\doamp{&}}%
+\DTLforeachkeyinrow{\thisValue}{
+\doamp\DTLifint{\thisValue}{\num{\thisValue}}{\sparser_breakanywhere:Nn{\thisValue}{#2}}
+}%foreachkeyinrow
+}%foreach
+\\\midrule
+\sparser_dict:n{Total}
+\doamp\num{\tscan}
+\doamp\num{\tlogical}
+\doamp\num{\tphysical}
+\doamp\num{\treadahead}
+\doamp\num{\tlogicalLOB}
+\doamp\num{\tphysicalLOB}
+\doamp\num{\treadaheadLOB}
+\\\bottomrule%
+\end{tabularx}
+}
+\DTLgdeletedb{io1}
+}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparseriocompare
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\int_new:N \l__sparser_ioSumAllA_int
+\int_new:N \l__sparser_ioSumAllB_int
+
+\NewDocumentCommand{\sparseriocompare}{m m O{0} O{1} O{0}} {
+\DTLloadrawdb[keys={table,scan,logical,physical,readahead,logicalLOB,physicalLOB,readaheadLOB}]{io1}{#1}
+\DTLloadrawdb[keys={table,scan,logical,physical,readahead,logicalLOB,physicalLOB,readaheadLOB}]{io2}{#2}
+
+\dtlsort{table}{io1}{\dtlwordindexcompare}
+\dtlsort{table}{io2}{\dtlwordindexcompare}
+
+\sparser_match_tables:nn {io1}{io2}
+
+\dtlsort{table}{io1}{\dtlwordindexcompare}
+\dtlsort{table}{io2}{\dtlwordindexcompare}
+
+\DTLsetnumberchars{}{,}
+\DTLsumcolumn{io1}{scan}{\tscan}%
+\DTLsumcolumn{io1}{logical}{\tlogical}%
+\DTLsumcolumn{io1}{physical}{\tphysical}%
+\DTLsumcolumn{io1}{readahead}{\treadahead}%
+\DTLsumcolumn{io1}{logicalLOB}{\tlogicalLOB}%
+\DTLsumcolumn{io1}{physicalLOB}{\tphysicalLOB}%
+\DTLsumcolumn{io1}{readaheadLOB}{\treadaheadLOB}%
+
+\DTLsumcolumn{io2}{scan}{\tscanb}%
+\DTLsumcolumn{io2}{logical}{\tlogicalb}%
+\DTLsumcolumn{io2}{physical}{\tphysicalb}%
+\DTLsumcolumn{io2}{readahead}{\treadaheadb}%
+\DTLsumcolumn{io2}{logicalLOB}{\tlogicalLOBb}%
+\DTLsumcolumn{io2}{physicalLOB}{\tphysicalLOBb}%
+\DTLsumcolumn{io2}{readaheadLOB}{\treadaheadLOBb}%
+
+\int_set:Nn \l__sparser_ioSumAllA_int  {\tscan+\tlogical+\tphysical+\treadahead+\tlogicalLOB+\tphysicalLOB+\treadaheadLOB}
+\int_set:Nn \l__sparser_ioSumAllB_int  {\tscanb+\tlogicalb+\tphysicalb+\treadaheadb+\tlogicalLOBb+\tphysicalLOBb+\treadaheadLOBb}
+
+\small{
+\begin{tabularx}{\linewidth}{
+%8 columns: \hsize is \linewidth/8 by default
+%make first column wider: 1.7 + 7*0.9 = 8
+>{\hsize=1.7\hsize}X
+*{7}{>{\raggedleft\arraybackslash\hsize=0.9\hsize}X}
+}
+\toprule
+% Do the header row.
+{\bfseries\sparser_dict:n{Table}}
+&{\bfseries\sparser_dict:n{Scans}}
+& \multicolumn{3}{c}{\bfseries\sparser_dict:n{Reads}}%
+& \multicolumn{3}{c}{\bfseries\sparser_dict:n{LOB-Reads}}%
+\\
+& & {\sparser_dict:n{logical}}
+& {\sparser_dict:n{physical}}
+& {\sparser_dict:n{r.-ahead}}
+& {\sparser_dict:n{logical}}
+& {\sparser_dict:n{physical}}
+& {\sparser_dict:n{r.-ahead}}
+% Iterate through the data.
+\gdef\isfirstrow{1}%
+\DTLforeach*{io1}{\vartable=table,\varscan=scan,\varlogical=logical,\varphysical=physical,\varreadahead=readahead,\varlogicalLOB=logicalLOB,\varphysicalLOB=physicalLOB,\varreadaheadLOB=readaheadLOB}{%
+\DTLassign{io2}{\DTLcurrentindex}{\vartableb=table,\varscanb=scan,\varlogicalb=logical,\varphysicalb=physical,\varreadaheadb=readahead,\varlogicalLOBb=logicalLOB,\varphysicalLOBb=physicalLOB,\varreadaheadLOBb=readaheadLOB}%
+\gdef\doamp{&}%
+\gdef\skiprow{#3}%
+\dtlifnumeq{\skiprow}{1}{%
+	\dtlifnumeq{\varscanb}{\varscan}{}{\gdef\skiprow{0}}%
+	\dtlifnumeq{\varlogicalb}{\varlogical}{}{\gdef\skiprow{0}}%
+	\dtlifnumeq{\varphysicalb}{\varphysical}{}{\gdef\skiprow{0}}%
+	\dtlifnumeq{\varreadaheadb}{\varreadahead}{}{\gdef\skiprow{0}}%
+	\dtlifnumeq{\varlogicalLOBb}{\varlogicalLOB}{}{\gdef\skiprow{0}}%
+	\dtlifnumeq{\varphysicalLOBb}{\varphysicalLOB}{}{\gdef\skiprow{0}}%
+	\dtlifnumeq{\varreadaheadLOBb}{\varreadaheadLOB}{}{\gdef\skiprow{0}}%
+}{}%
+\dtlifnumeq{\skiprow}{1}{}{%
+\dtlifnumeq{\isfirstrow}{1}{\\\midrule\gdef\isfirstrow{0}}{\\\rule{0pt}{2.5ex}}%
+\multirow[t]{2}{\hsize}{\sparser_breakanywhere:Nn{\vartable}{#5}}
+\doamp\num{\varscan}
+\doamp\num{\varlogical}
+\doamp\num{\varphysical}
+\doamp\num{\varreadahead}
+\doamp\num{\varlogicalLOB}
+\doamp\num{\varphysicalLOB}
+\doamp\num{\varreadaheadLOB}
+\\
+\doamp\sparser_colorscale:nnnnn{\varscan}{\varscanb}{\l__sparser_ioSumAllA_int}{\l__sparser_ioSumAllB_int}{#4}\num{\varscanb}
+\doamp\sparser_colorscale:nnnnn{\varlogical}{\varlogicalb}{\l__sparser_ioSumAllA_int}{\l__sparser_ioSumAllB_int}{#4}\num{\varlogicalb}
+\doamp\sparser_colorscale:nnnnn{\varphysical}{\varphysicalb}{\l__sparser_ioSumAllA_int}{\l__sparser_ioSumAllB_int}{#4}\num{\varphysicalb}
+\doamp\sparser_colorscale:nnnnn{\varreadahead}{\varreadaheadb}{\l__sparser_ioSumAllA_int}{\l__sparser_ioSumAllB_int}{#4}\num{\varreadaheadb}
+\doamp\sparser_colorscale:nnnnn{\varlogicalLOB}{\varlogicalLOBb}{\l__sparser_ioSumAllA_int}{\l__sparser_ioSumAllB_int}{#4}\num{\varlogicalLOBb}
+\doamp\sparser_colorscale:nnnnn{\varphysicalLOB}{\varphysicalLOBb}{\l__sparser_ioSumAllA_int}{\l__sparser_ioSumAllB_int}{#4}\num{\varphysicalLOBb}
+\doamp\sparser_colorscale:nnnnn{\varreadaheadLOB}{\varreadaheadLOBb}{\l__sparser_ioSumAllA_int}{\l__sparser_ioSumAllB_int}{#4}\num{\varreadaheadLOBb}%
+}}%end foreach*
+\\\midrule
+\sparser_dict:n{Total}
+\doamp\num{\tscan}
+\doamp\num{\tlogical}
+\doamp\num{\tphysical}
+\doamp\num{\treadahead}
+\doamp\num{\tlogicalLOB}
+\doamp\num{\tphysicalLOB}
+\doamp\num{\treadaheadLOB}
+\\
+\doamp\sparser_colorscale:nnnnn{\tscan}{\tscanb}{\l__sparser_ioSumAllA_int}{\l__sparser_ioSumAllB_int}{#4}\num{\tscanb}
+\doamp\sparser_colorscale:nnnnn{\tlogical}{\tlogicalb}{\l__sparser_ioSumAllA_int}{\l__sparser_ioSumAllB_int}{#4}\num{\tlogicalb}
+\doamp\sparser_colorscale:nnnnn{\tphysical}{\tphysicalb}{\l__sparser_ioSumAllA_int}{\l__sparser_ioSumAllB_int}{#4}\num{\tphysicalb}
+\doamp\sparser_colorscale:nnnnn{\treadahead}{\treadaheadb}{\l__sparser_ioSumAllA_int}{\l__sparser_ioSumAllB_int}{#4}\num{\treadaheadb}
+\doamp\sparser_colorscale:nnnnn{\tlogicalLOB}{\tlogicalLOBb}{\l__sparser_ioSumAllA_int}{\l__sparser_ioSumAllB_int}{#4}\num{\tlogicalLOBb}
+\doamp\sparser_colorscale:nnnnn{\tphysicalLOB}{\tphysicalLOBb}{\l__sparser_ioSumAllA_int}{\l__sparser_ioSumAllB_int}{#4}\num{\tphysicalLOBb}
+\doamp\sparser_colorscale:nnnnn{\treadaheadLOB}{\treadaheadLOBb}{\l__sparser_ioSumAllA_int}{\l__sparser_ioSumAllB_int}{#4}\num{\treadaheadLOBb}%
+\\\bottomrule%
+\end{tabularx}%
+}%
+
+\DTLgdeletedb{io1}%
+\DTLgdeletedb{io2}%
+}
+
+% variables for \sparser_match_tables:nn
+
+%sequences with table names
+\seq_new:N \l__sparser_tablesA_seq
+\seq_new:N \l__sparser_tablesB_seq
+%only for debug: table names that are added
+\seq_new:N \l__sparser_tablesAnew_seq
+\seq_new:N \l__sparser_tablesBnew_seq
+%string variables to store a single table name
+\str_new:N \l__sparser_tableNameA_str
+\str_new:N \l__sparser_tableNameB_str
+%int representing the relative lexicographical order of two string
+\int_new:N \l__sparser_tableCompare_int
+%loop condition
+\bool_new:N \l__sparser_loop_bool
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparser_match_tables:nn
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% compares the "table" comlumns of two databases and matches them with each other by adding rows with zeros
+% assumes the databases to be ordered by the "table" column
+\cs_new:Npn \sparser_match_tables:nn #1 #2
+{
+	%set debug out
+	\bool_set_false:N \l__sparser_debug_bool
+	
+	%store table names of db1 in sequence A
+	\DTLforeach*{#1}{\l__sparser_tableNameA_str=table} {
+		\seq_put_right:Nx \l__sparser_tablesA_seq {\l__sparser_tableNameA_str}
+	}
+	
+	%store table names of db1 in sequence B
+	\DTLforeach*{#2}{\l__sparser_tableNameB_str=table} {
+		\seq_put_right:Nx \l__sparser_tablesB_seq {\l__sparser_tableNameB_str}
+	}
+	
+	%loop condition: loop while seq A or seq B ist not empty
+	\bool_set:Nn \l__sparser_loop_bool {
+		!\seq_if_empty_p:N \l__sparser_tablesA_seq || !\seq_if_empty_p:N \l__sparser_tablesB_seq
+	}
+	
+	%set flag to make datatool expand the tablename variable when adding a new value
+	\dtlexpandnewvalue
+	
+	%loop: both sequences act as stacks
+	%with every iteration the first element of at least one of the stacks is popped
+	%this is decided by a comparison of the two table names
+	\bool_do_while:Nn \l__sparser_loop_bool
+	{
+		%debug out sequences, display "empty" if sequence is empty
+		%A
+		\seq_if_empty:NTF \l__sparser_tablesA_seq
+		{
+			\sparser_debug_out:n {A:\ \textcolor{spred}{empty}\\}
+		}{
+			\sparser_debug_out:n {A:\ \seq_use:Nn \l__sparser_tablesA_seq {,}\\}
+		}
+		
+		%B
+		\seq_if_empty:NTF \l__sparser_tablesB_seq
+		{
+			\sparser_debug_out:n {B:\ \textcolor{spred}{empty}\\}
+		}{
+			\sparser_debug_out:n {B:\ \seq_use:Nn \l__sparser_tablesB_seq {,}\\}
+		}
+		
+		% store first element of both stacks
+		\seq_get:NN \l__sparser_tablesA_seq \l__sparser_tableNameA_str
+		\seq_get:NN \l__sparser_tablesB_seq \l__sparser_tableNameB_str
+		
+		% compare both elements and set \l__sparser_tableCompare_int accordingly (-1, 0, 1)
+		\seq_if_empty:NTF \l__sparser_tablesA_seq 
+		{
+			%seq A is empty
+			\int_set:Nn \l__sparser_tableCompare_int {1}
+			% no check on B needed, since at least one sequence is always not empty (loop condition)
+		}
+		{
+			\seq_if_empty:NTF \l__sparser_tablesB_seq
+			{
+				%seq B is empty
+				\int_set:Nn \l__sparser_tableCompare_int {-1}
+			}
+			{
+				% both tables not empty
+				\str_if_eq:NNTF \l__sparser_tableNameA_str \l__sparser_tableNameB_str
+				{
+					%both table names are equal
+					\int_set:Nn \l__sparser_tableCompare_int {0}
+				}
+				{
+					% check if table name B is also in sequence A
+					\seq_if_in:NxTF \l__sparser_tablesA_seq \l__sparser_tableNameB_str
+					{
+						%yes => table name A is not in sequence B, because the sequences are ordered!
+						\int_set:Nn \l__sparser_tableCompare_int {-1}
+					}
+					{
+						%no => table name B is not in sequence A
+						\int_set:Nn \l__sparser_tableCompare_int {1}					
+					}
+				}
+			}
+		}
+
+		% action depending on the result of the comparison				
+		\int_case:nn {\l__sparser_tableCompare_int}
+		{
+			%0: both table names are equal and can be discarded
+			{0} {
+				\seq_pop:NN \l__sparser_tablesA_seq \l__sparser_tableNameA_str
+				\seq_pop:NN \l__sparser_tablesB_seq \l__sparser_tableNameB_str
+				\sparser_debug_out:n {pop A: \str_use:N \l__sparser_tableNameA_str\\}
+				\sparser_debug_out:n {pop B: \str_use:N \l__sparser_tableNameB_str\\}
+			}
+			%1: table name B is not in sequence A and thus has to be added
+			{1} {
+				% table name B can then removed from the stack
+				\seq_pop:NN \l__sparser_tablesB_seq \l__sparser_tableNameB_str
+				% add row to database A
+				\DTLnewrow{#1}
+				\DTLnewdbentry{#1}{table}{\l__sparser_tableNameB_str}
+				\DTLnewdbentry{#1}{scan}{0}
+				\DTLnewdbentry{#1}{logical}{0}
+				\DTLnewdbentry{#1}{physical}{0}
+				\DTLnewdbentry{#1}{readahead}{0}
+				\DTLnewdbentry{#1}{logicalLOB}{0}
+				\DTLnewdbentry{#1}{physicalLOB}{0}
+				\DTLnewdbentry{#1}{readaheadLOB}{0}	
+				%debug out
+				\sparser_debug_out:n {pop B: \str_use:N \l__sparser_tableNameB_str\\}
+				\seq_put_right:Nx \l__sparser_tablesAnew_seq \l__sparser_tableNameB_str
+			}
+			%-1: table name A is not in sequence B and thus has to be added
+			{-1} {
+				% table name A can then removed from the stack
+				\seq_pop:NN \l__sparser_tablesA_seq \l__sparser_tableNameA_str
+				% add row to database B
+				\DTLnewrow{#2}
+				\DTLnewdbentry{#2}{table}{\l__sparser_tableNameA_str}
+				\DTLnewdbentry{#2}{scan}{0}
+				\DTLnewdbentry{#2}{logical}{0}
+				\DTLnewdbentry{#2}{physical}{0}
+				\DTLnewdbentry{#2}{readahead}{0}
+				\DTLnewdbentry{#2}{logicalLOB}{0}
+				\DTLnewdbentry{#2}{physicalLOB}{0}
+				\DTLnewdbentry{#2}{readaheadLOB}{0}
+				%debug out
+				\sparser_debug_out:n {pop A: \str_use:N \l__sparser_tableNameA_str\\}
+				\seq_put_right:Nx \l__sparser_tablesBnew_seq \l__sparser_tableNameA_str
+			}
+		}
+
+		%debug out sequence of newly added table names
+		\seq_if_empty:NTF \l__sparser_tablesAnew_seq
+		{
+			\sparser_debug_out:n {A new:\ \textcolor{spred}{empty}\\}
+		}{
+			\sparser_debug_out:n {A new:\ \seq_use:Nn \l__sparser_tablesAnew_seq {,}\\}
+		}
+		
+		\seq_if_empty:NTF \l__sparser_tablesBnew_seq
+		{
+			\sparser_debug_out:n {B new:\ \textcolor{spred}{empty}\\}
+		}{
+			\sparser_debug_out:n {B new:\ \seq_use:Nn \l__sparser_tablesBnew_seq {,}\\}
+		}
+				
+		%update loop condition
+		\bool_set:Nn \l__sparser_loop_bool {
+			!\seq_if_empty_p:N \l__sparser_tablesA_seq || !\seq_if_empty_p:N \l__sparser_tablesB_seq
+		}
+		%debug out
+		\sparser_debug_out:n {--------\\}
+	}
+	
+	%clear sequences and reset flag
+	\seq_clear:N \l__sparser_tablesAnew_seq
+	\seq_clear:N \l__sparser_tablesBnew_seq
+	\dtlnoexpandnewvalue
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparser_breakanywhere:Nn
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\cs_new:Npn \sparser_breakanywhere:Nn #1 #2 {
+	\int_compare:nTF {#2 = 0}
+	{
+		\str_set:Nx \l__sparser_tableNameA_str {#1}
+	}{
+		\int_compare:nTF {\str_count:N #1>#2}{
+			\int_compare:nTF {\str_count:N #2>4}{
+				\str_set:Nx \l__sparser_tableNameA_str {\str_range:Nnn #1 {1}{#2-4}}
+			} {
+				\str_set:Nx \l__sparser_tableNameA_str {\str_range:Nnn #1 {1}{#2}}
+			}
+		}{
+			\str_set:Nx \l__sparser_tableNameA_str {\str_range:Nnn #1 {1}{#2}}
+		}
+	}
+	\str_map_inline:Nn  \l__sparser_tableNameA_str {
+		##1\allowbreak
+	}
+	\int_compare:nTF {#2 = 0}{}{\int_compare:nTF {\str_count:N #1>#2}{\int_compare:nTF {\str_count:N #2>4}{...}{}}{}}
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparser_colorscale:nnnnn
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\cs_new:Npn \sparser_colorscale:nnnnn #1 #2 #3 #4 #5{
+	\int_compare:nTF {#5 = 0} {} {
+		\int_compare:nTF {#1 = #2} {} {
+			\int_compare:nNnTF {\int_max:nn{#3}{#4}} = {0} {} {
+			% (|#2-#1|)/max(#3,#4) in [0,1]
+			% x^(1/#5): [0,1] -> [0,1] scaling to make small values more visible
+				\cellcolor{\int_compare:nNnTF {#1} < {#2} {spred!}{spdarkgreen!}
+				\fp_to_int:n{\fp_eval:n{100*(\fp_abs:n{(#1-#2)/\fp_max:nn{#3}{#4}})**(1/#5)}}}
+			}
+		}
+	}
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \sparser_dict:n 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\cs_new:Npn \sparser_dict:n #1 {
+	\str_case:nn {#1} {
+		{Table} {
+			\str_case_e:nnTF {\languagename} {
+				{english} {Table}
+				{german} {Tabelle}				
+				{ngerman} {Tabelle}
+			}
+			{}
+			{#1}				
+		}
+		{Scans} {
+			\str_case_e:nnTF {\languagename} {
+				{english} {Scans}
+				{german} {Scans}				
+				{ngerman} {Scans}
+			}
+			{}
+			{#1}				
+		}
+		{Reads} {
+			\str_case_e:nnTF {\languagename} {
+				{english} {Reads}
+				{german} {Lesevorgänge}				
+				{ngerman} {Lesevorgänge}
+			}
+			{}
+			{#1}				
+		}
+		{LOB-Reads} {
+			\str_case_e:nnTF {\languagename} {
+				{english} {LOB-Reads}
+				{german} {LOB-Lesevorgänge}				
+				{ngerman} {LOB-Lesevorgänge}
+			}
+			{}
+			{#1}				
+		}
+		{logical} {
+			\str_case_e:nnTF {\languagename} {
+				{english} {logical}
+				{german} {logisch}				
+				{ngerman} {logisch}
+			}
+			{}
+			{#1}				
+		}
+		{physical} {
+			\str_case_e:nnTF {\languagename} {
+				{english} {physical}
+				{german} {phys.}				
+				{ngerman} {phys.}
+			}
+			{}
+			{#1}				
+		}
+		{r.-ahead} {
+			\str_case_e:nnTF {\languagename} {
+				{english} {r.-ahead}
+				{german} {r.-ahead}				
+				{ngerman} {r.-ahead}
+			}
+			{}
+			{#1}				
+		}
+		{Batch} {
+			\str_case_e:nnTF {\languagename} {
+				{english} {Batch}
+				{german} {Batch}				
+				{ngerman} {Batch}
+			}
+			{}
+			{#1}				
+		}
+		{Parse and compile time} {
+			\str_case_e:nnTF {\languagename} {
+				{english} {Parse~and~compile~time}
+				{german} {Analyse-~und~Kompilierzeit}				
+				{ngerman} {Analyse-~und~Kompilierzeit}
+			}
+			{}
+			{#1}				
+		}
+		{Statement} {
+			\str_case_e:nnTF {\languagename} {
+				{english} {Stmt}
+				{german} {Statement}				
+				{ngerman} {Statement}
+			}
+			{}
+			{#1}				
+		}
+		{Rows} {
+			\str_case_e:nnTF {\languagename} {
+				{english} {Rows}
+				{german} {Reihen}				
+				{ngerman} {Reihen}
+			}
+			{}
+			{#1}				
+		}
+		{Execution Times} {
+			\str_case_e:nnTF {\languagename} {
+				{english} {Execution~Times}
+				{german} {Ausführungszeiten}				
+				{ngerman} {Ausführungszeiten}
+			}
+			{}
+			{#1}				
+		}
+		{CPU} {
+			\str_case_e:nnTF {\languagename} {
+				{english} {CPU}
+				{german} {CPU-Zeit}				
+				{ngerman} {CPU-Zeit}
+			}
+			{}
+			{#1}				
+		}
+		{elapsed} {
+			\str_case_e:nnTF {\languagename} {
+				{english} {elapsed}
+				{german} {Echtzeit}				
+				{ngerman} {Echtzeit}
+			}
+			{}
+			{#1}				
+		}
+		{Total} {
+			\str_case_e:nnTF {\languagename} {
+				{english} {Total}
+				{german} {Summe}				
+				{ngerman} {Summe}
+			}
+			{}
+			{#1}				
+		}
+	}
+}
+
+\ExplSyntaxOff

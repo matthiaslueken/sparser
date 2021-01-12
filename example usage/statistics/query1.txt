@@ -1,0 +1,78 @@
+SQL Server parse and compile time: 
+   CPU time = 188 ms, elapsed time = 404 ms.
+
+ SQL Server Execution Times:
+   CPU time = 0 ms,  elapsed time = 0 ms.
+
+ SQL Server Execution Times:
+   CPU time = 0 ms,  elapsed time = 0 ms.
+
+ SQL Server Execution Times:
+   CPU time = 0 ms,  elapsed time = 0 ms.
+-----------------------
+
+ SQL Server Execution Times:
+   CPU time = 0 ms,  elapsed time = 0 ms.
+First Batch
+
+ SQL Server Execution Times:
+   CPU time = 0 ms,  elapsed time = 0 ms.
+
+(17 rows affected)
+Table 'PhoneNumberType'. Scan count 1, logical reads 35, physical reads 1, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'PersonPhone'. Scan count 17, logical reads 34, physical reads 2, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'EmailAddress'. Scan count 17, logical reads 34, physical reads 2, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'SalesTerritory'. Scan count 1, logical reads 35, physical reads 1, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'CountryRegion'. Scan count 0, logical reads 34, physical reads 3, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'StateProvince'. Scan count 0, logical reads 34, physical reads 3, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'Employee'. Scan count 0, logical reads 34, physical reads 2, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'Address'. Scan count 0, logical reads 34, physical reads 3, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'Person'. Scan count 0, logical reads 51, physical reads 3, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'BusinessEntityAddress'. Scan count 17, logical reads 34, physical reads 2, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'SalesPerson'. Scan count 1, logical reads 2, physical reads 1, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+
+ SQL Server Execution Times:
+   CPU time = 0 ms,  elapsed time = 12 ms.
+
+(712 rows affected)
+Table 'Workfile'. Scan count 0, logical reads 0, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'Worktable'. Scan count 0, logical reads 0, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'Address'. Scan count 1, logical reads 216, physical reads 1, read-ahead reads 211, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'BusinessEntityAddress'. Scan count 6, logical reads 61, physical reads 1, read-ahead reads 48, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'AddressType'. Scan count 1, logical reads 2, physical reads 1, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'Store'. Scan count 1, logical reads 103, physical reads 1, read-ahead reads 101, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'StateProvince'. Scan count 1, logical reads 4, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'CountryRegion'. Scan count 1, logical reads 4, physical reads 1, read-ahead reads 16, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+
+ SQL Server Execution Times:
+   CPU time = 0 ms,  elapsed time = 298 ms.
+SQL Server parse and compile time: 
+   CPU time = 15 ms, elapsed time = 23 ms.
+-----------------------
+
+ SQL Server Execution Times:
+   CPU time = 0 ms,  elapsed time = 0 ms.
+Second Batch
+
+ SQL Server Execution Times:
+   CPU time = 0 ms,  elapsed time = 0 ms.
+
+(41 rows affected)
+Table 'Workfile'. Scan count 0, logical reads 0, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'Worktable'. Scan count 0, logical reads 0, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'PersonPhone'. Scan count 41, logical reads 104, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'EmailAddress'. Scan count 41, logical reads 104, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'Store'. Scan count 1, logical reads 103, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'BusinessEntityAddress'. Scan count 633, logical reads 1464, physical reads 1, read-ahead reads 48, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'Address'. Scan count 1, logical reads 250, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'Person'. Scan count 0, logical reads 51, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'SalesPerson'. Scan count 1, logical reads 2, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'Employee'. Scan count 1, logical reads 9, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'StateProvince'. Scan count 2, logical reads 8, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'CountryRegion'. Scan count 2, logical reads 8, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'AddressType'. Scan count 1, logical reads 2, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'SalesTerritory'. Scan count 1, logical reads 2, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'PhoneNumberType'. Scan count 1, logical reads 2, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+
+ SQL Server Execution Times:
+   CPU time = 16 ms,  elapsed time = 45 ms.
